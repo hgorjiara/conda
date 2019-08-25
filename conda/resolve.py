@@ -855,10 +855,12 @@ class Resolve(object):
 
     @time_recorder(module_name=__name__)
     def gen_clauses(self):
+        print ("In Generate_Clauses")
         C = Clauses(sat_solver_cls=_get_sat_solver_cls(context.sat_solver))
         for name, group in iteritems(self.groups):
             group = [self.to_sat_name(prec) for prec in group]
             # Create one variable for each package
+            print("( "+name+" = " + group+ " )")
             for sat_name in group:
                 C.new_var(sat_name)
             # Create one variable for the group
@@ -876,6 +878,8 @@ class Resolve(object):
 
         if log.isEnabledFor(DEBUG):
             log.debug("gen_clauses returning with clause count: %d", C.get_clause_count())
+        print("Here is C:")
+        print(C)
         return C
 
     def generate_spec_constraints(self, C, specs):
