@@ -1100,6 +1100,8 @@ class Resolve(object):
             # list of packages to maintain consistency with
             snames = set()
             eq_optional_c = r2.generate_removal_count(C, specs)
+            print("SATUNE:eq_optional_c")
+            print(eq_optional_c)
             solution, _ = C.minimize(eq_optional_c, C.sat())
             snames.update(sat_name_map[sat_name]['name']
                           for sat_name in (C.from_index(s) for s in solution)

@@ -784,6 +784,8 @@ class Clauses(object):
         minimization is multiobjective: first, we minimize the largest
         active coefficient value, then we minimize the sum.
         """
+        print("SATUNE:minimize:objective")
+        print(objective)
         if bestsol is None or len(bestsol) < self.m:
             log.debug('Clauses added, recomputing solution')
             bestsol = self.sat()
