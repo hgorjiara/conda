@@ -17,7 +17,8 @@ from .models.enums import NoarchType
 from .models.records import PackageRef
 from .models.match_spec import MatchSpec
 from .models.version import VersionOrder
-
+import time
+import sys
 try:
     from cytoolz.itertoolz import concat, groupby
 except ImportError:  # pragma: no cover
@@ -30,6 +31,8 @@ stdoutlog = getLogger('conda.stdoutlog')
 Unsatisfiable = UnsatisfiableError
 ResolvePackageNotFound = ResolvePackageNotFound
 
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
 
 def dashlist(iterable, indent=2):
     return ''.join('\n' + ' ' * indent + '- ' + str(x) for x in iterable)
@@ -696,8 +699,12 @@ class Resolve(object):
         r2 = Resolve(dists, True, True, channels=self.channels)
         C = r2.gen_clauses()
         constraints = r2.generate_spec_constraints(C, specs)
-        solution = C.sat(constraints)
-        return bool(solution)
+        start = time.time()
+	solution = C.sat(constraints)
+        end = time.time()
+	eprint("SAT SOLVING TIME:")
+	eprint(end - start)
+	return bool(solution)
 
     def get_conflicting_specs(self, specs):
         if not specs:
@@ -711,7 +718,11 @@ class Resolve(object):
 
         r2 = Resolve(reduced_index, True, True, channels=self.channels)
         C = r2.gen_clauses()
+	start = time.time()
         solution = mysat(specs, True)
+	end = time.time()
+	eprint("SAT SOLVING TIME:")
+	eprint(end - start)
         if solution:
             return ()
         else:
@@ -732,7 +743,11 @@ class Resolve(object):
         r2 = Resolve(dists, True, True, channels=self.channels)
         C = r2.gen_clauses()
         constraints = r2.generate_spec_constraints(C, specs)
-        solution = C.sat(constraints)
+        start = time.time()
+	solution = C.sat(constraints)
+	end = time.time()
+	eprint("SAT SOLVING TIME:")
+        eprint(end - start)
         limit = xtra = None
         if not solution or xtra:
             def get_(name, snames):
@@ -851,7 +866,11 @@ class Resolve(object):
 
         r2 = Resolve(reduced_index, True, True, channels=self.channels)
         C = r2.gen_clauses()
+	start = time.time()
         solution = mysat(specs, True)
+	end = time.time()
+	eprint("SAT SOLVING TIME:")
+        eprint(end - start)
         if not solution:
             specs = minimal_unsatisfiable_subset(specs, sat=mysat)
             self.find_conflicts(specs)
