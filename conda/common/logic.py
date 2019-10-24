@@ -30,11 +30,14 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 from itertools import chain, combinations
 from logging import getLogger
 import pycosat
-
+import sys
+import time
 from .compat import iteritems
 
 log = getLogger(__name__)
 
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
 
 # Code that uses special cases (generates no clauses) is in ADTs/FEnv.h in
 # minisatp. Code that generates clauses is in Hardware_clausify.cc (and are
@@ -432,8 +435,12 @@ class Clauses(object):
                 if not additional[-1]:
                     return None
                 clauses = tuple(chain(clauses, additional))
-        log.debug("Invoking SAT with clause count: %s", len(clauses))
+        eprint("Invoking SAT with clause count: " + str(len(clauses)))
+	start = time.time()
         solution = pycosat.solve(clauses, vars=self.m, prop_limit=limit)
+	end = time.time()
+        eprint("PycoSAT SOLVING TIME:")
+        eprint(end - start)
         if solution in ("UNSAT", "UNKNOWN"):
             return None
         if additional and includeIf:
