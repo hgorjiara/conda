@@ -489,7 +489,8 @@ class Resolve(object):
             if spec.optional:
                 ms2 = MatchSpec(track_features=tf) if tf else MatchSpec(nm)
                 dists.append('!' + self.to_sat_name(ms2))
-            m = C.Any(dists)
+            m,_ = C.Any(dists)
+	#eprint("name_var[" + str(sat_name) + "] = " + str(m))
         C.name_var(m, sat_name)
         return sat_name
 
@@ -498,20 +499,25 @@ class Resolve(object):
         for name, group in iteritems(self.groups):
             group = [self.to_sat_name(dist) for dist in group]
             # Create one variable for each package
+	    satvars=[]
             for sat_name in group:
-                C.new_var(sat_name)
+                satvars.append(C.new_var(sat_name))
             # Create one variable for the group
             m = C.new_var(self.to_sat_name(MatchSpec(name)))
-
+	    C.create_booleanvar(m)
+	    eprint("INFO1: " + str(group) + " =====> ["+ str(satvars) + "] :: " + str(m))
+	    C.create_element(satvars)
             # Exactly one of the package variables, OR
             # the negation of the group variable, is true
-            C.Require(C.ExactlyOne, group + [C.Not(m)])
+	    NotM,_ = C.Not(m)
+            C.Require(True, C.ExactlyOne, group + [NotM])
 
         # If a package is installed, its dependencies must be as well
         for dist in iterkeys(self.index):
-            nkey = C.Not(self.to_sat_name(dist))
+            nkey,_ = C.Not(self.to_sat_name(dist))
             for ms in self.ms_depends(dist):
-                C.Require(C.Or, nkey, self.push_MatchSpec(C, ms))
+		eprint("INFO2: OR( " + str(nkey) +" , " + str(C.Convert_(ms)) + " )" )
+                C.Require(True, C.Or, nkey, self.push_MatchSpec(C, ms))
 
         log.debug("gen_clauses returning with clause count: %s", len(C.clauses))
         return C
@@ -714,6 +720,7 @@ class Resolve(object):
         # Check if satisfiable
         def mysat(specs, add_if=False):
             constraints = r2.generate_spec_constraints(C, specs)
+	    assert(False)
             return C.sat(constraints, add_if)
 
         r2 = Resolve(reduced_index, True, True, channels=self.channels)
@@ -743,11 +750,7 @@ class Resolve(object):
         r2 = Resolve(dists, True, True, channels=self.channels)
         C = r2.gen_clauses()
         constraints = r2.generate_spec_constraints(C, specs)
-        start = time.time()
 	solution = C.sat(constraints)
-	end = time.time()
-	eprint("SAT SOLVING TIME:")
-        eprint(end - start)
         limit = xtra = None
         if not solution or xtra:
             def get_(name, snames):
@@ -761,6 +764,7 @@ class Resolve(object):
             # list of packages to maintain consistency with
             snames = set()
             eq_optional_c = r2.generate_removal_count(C, specs)
+	    assert(False)
             solution, _ = C.minimize(eq_optional_c, C.sat())
             snames.update(dists[Dist(q)]['name']
                           for q in (C.from_index(s) for s in solution)
@@ -862,7 +866,8 @@ class Resolve(object):
         # Check if satisfiable
         def mysat(specs, add_if=False):
             constraints = r2.generate_spec_constraints(C, specs)
-            return C.sat(constraints, add_if)
+            assert(False)
+	    return C.sat(constraints, add_if)
 
         r2 = Resolve(reduced_index, True, True, channels=self.channels)
         C = r2.gen_clauses()
@@ -961,6 +966,7 @@ class Resolve(object):
         psolutions.append(psolution)
         while True:
             nclause = tuple(C.Not(C.from_name(q)) for q in psolution)
+	    assert(False)
             solution = C.sat((nclause,), True)
             if solution is None:
                 break

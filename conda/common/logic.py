@@ -32,6 +32,7 @@ from logging import getLogger
 import pycosat
 import sys
 import time
+from satune import Satune
 from .compat import iteritems
 
 log = getLogger(__name__)
@@ -50,6 +51,7 @@ class Clauses(object):
         self.indices = {}
         self.unsat = False
         self.m = m
+	self.satune = Satune()
 
     def name_var(self, m, name):
         nname = '!' + name
@@ -67,6 +69,12 @@ class Clauses(object):
             self.name_var(m, name)
         return m
 
+    def create_element(self, myset):
+    	self.satune.createNewElement(myset);
+
+    def create_booleanvar(self, m):
+    	self.satune.createNewBooleanVar(m)
+
     def from_name(self, name):
         return self.names.get(name)
 
@@ -77,12 +85,15 @@ class Clauses(object):
         tvals = type(vals)
         if tvals is tuple:
             x = self.new_var()
+	    eprint("new var in Assign_ " + str(x))
             self.clauses.extend((-x,) + y for y in vals[0])
             self.clauses.extend((x,) + y for y in vals[1])
         elif tvals is bool and name:
             x = self.new_var()
+	    eprint("new var in Assign_ name " + str(x))
             self.clauses.append((x,) if vals else (-x,))
         else:
+	    eprint("Not creating new var! Using vals " + str(vals))
             x = vals
         return self.name_var(x, name) if name else x
 
@@ -101,11 +112,14 @@ class Clauses(object):
             return self.Assign_(vals, name)
         tvals = type(vals)
         if tvals is tuple:
+	    eprint("tvals are tuples: " + str(vals))
             self.clauses.extend(vals[0])
             self.clauses.extend(vals[1])
         elif tvals is not bool:
+	    eprint("tvals are not Bool:" + str(vals))
             self.clauses.append((vals if polarity else -vals,))
         else:
+	    assert(nz == len(self.clauses))
             self.clauses = self.clauses[:nz]
             self.unsat = self.unsat or polarity != vals
 
@@ -124,16 +138,28 @@ class Clauses(object):
             return self.All_(map(self.Assign_, args), polarity)
 
     def Prevent(self, what, *args):
-        return what.__get__(self, Clauses)(*args, polarity=False, name=False)
+    	eprint("Prevent: Running " + str(what) + " arg:")
+	eprint(self.Convert_(args))
+        ret, satval = what.__get__(self, Clauses)(*args, polarity=False, name=False)
+	eprint("Conda addConstraint: " + str(ret))
+	self.satune.addConstraint( satune.Not(satval, False))
+	return ret
 
-    def Require(self, what, *args):
-        return what.__get__(self, Clauses)(*args, polarity=True, name=False)
+    def Require(self, addConstr, what, *args):
+    	eprint("Require: Running " + str(what) +" arg:")
+	eprint(self.Convert_(args))
+        ret, satval = what.__get__(self, Clauses)(*args, polarity=True, name=False)
+        if addConstr:
+	    self.satune.addConstraint(satval)
+	return ret
 
     def Not_(self, x, polarity=None):
+        eprint("Not_ x=" + str(x))
         return (not x) if type(x) is bool else -x
 
     def Not(self, x, polarity=None, name=None):
-        return self.Eval_(self.Not_, (x,), polarity, name)
+    	convX = self.Convert_(x)
+        return self.Eval_(self.Not_, (x,), polarity, name), self.satune.Not(convX) if polarity in (True, None) else self.satune.getConstraint(convX)
 
     def And_(self, f, g, polarity=None):
         if f is False or g is False:
@@ -151,7 +177,9 @@ class Clauses(object):
         return pval, nval
 
     def And(self, f, g, polarity=None, name=None):
-        return self.Eval_(self.And_, (f, g), polarity, name)
+    	convF = self.Convert_(f)
+	convG = self.Convert_(g)
+        return self.Eval_(self.And_, (f, g), polarity, name), self.satune.And(convF,convG) if polarity in (True, None) else self.satune.Not(self.satune.And(convF,convG), False)
 
     def Or_(self, f, g, polarity):
         if f is True or g is True:
@@ -169,7 +197,11 @@ class Clauses(object):
         return pval, nval
 
     def Or(self, f, g, polarity=None, name=None):
-        return self.Eval_(self.Or_, (f, g), polarity, name)
+    	convF = self.Convert_(f)
+	convG = self.Convert_(g)
+	eprint("f:Conv( " + str(f) + " )= "+ str(convF))
+	eprint("g:Conv( " + str(g) + " )= "+ str(convG))
+	return self.Eval_(self.Or_, (f, g), polarity, name), self.satune.Or(convF,convG) if polarity in (True,None) else self.satune.Not(self.satune.Or(convF,convG), False)
 
     def Xor_(self, f, g, polarity):
         if f is False:
@@ -191,7 +223,9 @@ class Clauses(object):
         return pval, nval
 
     def Xor(self, f, g, polarity=None, name=None):
-        return self.Eval_(self.Xor_, (f, g), polarity, name)
+    	convF = self.Convert_(f)
+	convG = self.Convert_(g)
+        return self.Eval_(self.Xor_, (f, g), polarity, name), self.satune.Xor(convF,convG) if polarity in (True, None) else self.satune.Not(self.satune.Xor(convF, convG), False)
 
     def ITE_(self, c, t, f, polarity):
         if c is True:
@@ -219,14 +253,20 @@ class Clauses(object):
         nval = [(-c, -t), (c, -f), (-t, -f)] if polarity in (False, None) else []
         return pval, nval
 
-    def ITE(self, c, t, f, polarity=None, name=None):
+    def ITE(self, c, t, f, polarity=None, name=None, satune=True):
         """
         if c then t else f
 
         In this function, if any of c, t, or f are True and False the resulting
         expression is resolved.
         """
-        return self.Eval_(self.ITE_, (c, t, f), polarity, name)
+	satuneConstr = None
+	if satune:
+    	    convC = self.Convert_(c)
+	    convT = self.Convert_(t)
+	    convF = self.Convert_(f)
+	    satuneConstr = self.satune.ITE(convC,convT,convF) if polarity in (True, None) else self.satune.Not(self.satune.ITE(convC,convT,convF), False)
+        return self.Eval_(self.ITE_, (c, t, f), polarity, name), satuneConstr
 
     def All_(self, iter, polarity=None):
         vals = set()
@@ -246,7 +286,9 @@ class Clauses(object):
         return pval, nval
 
     def All(self, iter, polarity=None, name=None):
-        return self.Eval_(self.All_, (iter,), polarity, name)
+        vals = [x for x in iter]
+	convVals = self.Convert_(vals)
+        return self.Eval_(self.All_, (iter,), polarity, name), self.satune.All(convVals) if polarity in (True, None) else self.satune.Not(self.satune.All(convVals), False)
 
     def Any_(self, iter, polarity):
         vals = set()
@@ -266,7 +308,8 @@ class Clauses(object):
         return pval, nval
 
     def Any(self, vals, polarity=None, name=None):
-        return self.Eval_(self.Any_, (list(vals),), polarity, name)
+        convVals = self.Convert_(vals)
+        return self.Eval_(self.Any_, (list(vals),), polarity, name) , self.satune.Any(convVals) if polarity in (True, None) else self.satune.Not(self.satune.Any(convVals), False)
 
     def AtMostOne_NSQ_(self, vals, polarity):
         combos = []
@@ -291,7 +334,8 @@ class Clauses(object):
             what = self.AtMostOne_NSQ
         else:
             what = self.AtMostOne_BDD
-        return self.Eval_(what, (vals,), polarity, name)
+	convVals = self.Convert_(vals)
+        return self.Eval_(what, (vals,), polarity, name), self.satune.AtMostOne(convVals) if polarity in (True, None) else self.satune.Not(self.satune.AtMostOne(convVals), False)
 
     def ExactlyOne_NSQ_(self, vals, polarity):
         vals = list(vals)
@@ -316,7 +360,8 @@ class Clauses(object):
             what = self.ExactlyOne_NSQ
         else:
             what = self.ExactlyOne_BDD
-        return self.Eval_(what, (vals,), polarity, name)
+	convVals = self.Convert_(vals)
+        return self.Eval_(what, (vals,), polarity, name), self.satune.ExactlyOne(convVals) if polarity in (True, None) else self.satune.Not(self.satune.ExactlyOne(convVals), False)
 
     def LB_Preprocess_(self, equation):
         if type(equation) is dict:
@@ -349,8 +394,8 @@ class Clauses(object):
             if lower_limit <= 0 and upper_limit >= total:
                 ret[call_stack.pop()] = True
                 continue
-            if lower_limit > total or upper_limit < 0:
-                ret[call_stack.pop()] = False
+            if lower_limit > total or upper_limit < 0: 
+		ret[call_stack.pop()] = False
                 continue
             LC, LA = equation[ndx]
             ndx -= 1
@@ -365,8 +410,59 @@ class Clauses(object):
             if tlo is None:
                 call_stack.append(lo_key)
                 continue
-            ret[call_stack.pop()] = self.ITE(abs(LA), thi, tlo, polarity)
+	    #eprint("BDD_.self.ITE (" + str(abs(LA)) + ", " + str(thi) + ", " + str(tlo) +" )")
+            ret[call_stack.pop()], _ = self.ITE(abs(LA), thi, tlo, polarity, None, False)
         return ret[target]
+
+    def BDD_Satune(self, equation, nterms, lo, hi, polarity):
+        assert(False)
+        # The equation is sorted in order of increasing coefficients.
+        # Then we take advantage of the following recurrence:
+        #                l      <= S + cN xN <= u
+        #  => IF xN THEN l - cN <= S         <= u - cN
+        #           ELSE l      <= S         <= u
+        # we use memoization to prune common subexpressions
+        total = sum(c for c, _ in equation[:nterms])
+        target = (nterms-1, 0, total)
+        call_stack = [target]
+        ret = {}
+	retSAT={}
+        csum = 0
+        while call_stack:
+            ndx, csum, total = call_stack[-1]
+            lower_limit = lo - csum
+            upper_limit = hi - csum
+            if lower_limit <= 0 and upper_limit >= total:
+	    	index = call_stack.pop()
+                ret[index] = True
+		retSAT[index] = self.satune.getBooleanTrue()
+                continue
+            if lower_limit > total or upper_limit < 0:
+                index = call_stack.pop()
+		ret[index] = False
+		retSAT[index]= self.satune.getBooleanFalse()
+                continue
+            LC, LA = equation[ndx]
+            ndx -= 1
+            total -= LC
+            hi_key = (ndx, csum if LA < 0 else csum + LC, total)
+            thi = ret.get(hi_key)
+	    thiSAT = retSAT.get(hi_key)
+            if thi is None:
+                call_stack.append(hi_key)
+                continue
+            lo_key = (ndx, csum + LC if LA < 0 else csum, total)
+            tlo = ret.get(lo_key)
+	    tloSAT = retSAT.get(lo_key)
+            if tlo is None:
+                call_stack.append(lo_key)
+                continue
+	    #eprint("BDD_SATUNE.self.ITE (" + str(abs(LA)) + ", " + str(thi) + ", " + str(tlo) +" )")
+	    assert(False)
+	    index = call_stack.pop()
+            ret[index], retSAT[index] = self.ITE(abs(LA), thi, tlo, polarity)
+        return ret[target], retSAT[target]
+
 
     def LinearBound_(self, equation, lo, hi, preprocess, polarity):
         if preprocess:
@@ -392,13 +488,49 @@ class Clauses(object):
         else:
             res = self.BDD_(equation, nterms, lo, hi, polarity)
         if nprune:
-            prune = self.All_([-a for c, a in equation[nterms:]], polarity)
+            prune= self.All_([-a for c, a in equation[nterms:]], polarity)
             res = self.Combine_((res, prune), polarity)
         return res
 
+
+    def LinearBound_Satune(self, equation, lo, hi, preprocess, polarity):
+        assert(False)
+	if preprocess:
+            equation, offset = self.LB_Preprocess_(equation)
+            lo -= offset
+            hi -= offset
+        nterms = len(equation)
+        if nterms and equation[-1][0] > hi:
+            nprune = sum(c > hi for c, a in equation)
+            log.trace('Eliminating %d/%d terms for bound violation' % (nprune, nterms))
+            nterms -= nprune
+        else:
+            nprune = 0
+        # Tighten bounds
+        total = sum(c for c, _ in equation[:nterms])
+        if preprocess:
+            lo = max([lo, 0])
+            hi = min([hi, total])
+        if lo > hi:
+            #return False
+	    return self.satune.getBooleanFalse()
+        if nterms == 0:
+            res = lo == 0
+	    resSAT = self.satune.getBooleanTrue() if lo ==0 else self.satune.getBooleanFalse()
+        else:
+            res = self.BDD_(equation, nterms, lo, hi, polarity)
+            resSAT = self.BDD_Satune(equation, nterms, lo, hi, polarity)
+        if nprune:
+	    values=[-a for c, a in equation[nterms:]]
+            prune = self.All_(values, polarity)
+	    pruneSAT= self.satune.All(values) if polarity in (True, None) else self.satune.Not(self.satune.All(values) , False)
+            res = self.Combine_((res, prune), polarity)
+	    resSAT = self.satune.All([resSAT,pruneSAT], False) if polarity in (True, None) else self.satune.Not(self.satune.All([resSAT,pruneSAT], False), False)
+        return resSAT
+
     def LinearBound(self, equation, lo, hi, preprocess=True, polarity=None, name=None):
         return self.Eval_(self.LinearBound_, (equation, lo, hi, preprocess),
-                          polarity, name, conv=False)
+                          polarity, name, conv=False), LinearBound_Satune(equation, lo, hi, preprocess, polarity)
 
     def sat(self, additional=None, includeIf=False, names=False, limit=0):
         """
@@ -435,34 +567,52 @@ class Clauses(object):
                 if not additional[-1]:
                     return None
                 clauses = tuple(chain(clauses, additional))
-        eprint("Invoking SAT with clause count: " + str(len(clauses)))
+		def addAdditionalToSatune():
+			vals = [list(x) for x in additional]
+			eprint("vals = "+ str(vals))
+			valsConstr =[]
+			for v in vals:
+				valsConstr.append(self.satune.Any(v))
+			self.satune.addConstraint(self.satune.All( valsConstr, False))
+		addAdditionalToSatune()
+	#self.satune.printConstraints()
+	eprint("Invoking SAT with clause count: " + str(len(clauses)))
+	eprint("Clauses= " + str(clauses))
 	start = time.time()
         solution = pycosat.solve(clauses, vars=self.m, prop_limit=limit)
 	end = time.time()
+	satsolution = self.satune.solve()
+	satend = time.time()
         eprint("PycoSAT SOLVING TIME:")
         eprint(end - start)
+	eprint("SATTune SOLVING TIME:")
+	eprint(satend - end)
+	eprint("satsolution=" + str(satsolution))
+	eprint("solution=" + str(solution))
+	assert((satsolution ==0 and solution == "UNSAT") or (satsolution ==1 and solution == "SAT")  )
         if solution in ("UNSAT", "UNKNOWN"):
             return None
         if additional and includeIf:
+	    assert(False)
             self.clauses.extend(additional)
         if names:
             return set(nm for nm in (self.indices.get(s) for s in solution) if nm and nm[0] != '!')
         return solution
 
-    def itersolve(self, constraints=None, m=None):
-        exclude = []
-        if m is None:
-            m = self.m
-        while True:
+    #def itersolve(self, constraints=None, m=None):
+    #    exclude = []
+    #    if m is None:
+    #        m = self.m
+    #    while True:
             # We don't use pycosat.itersolve because it is more
             # important to limit the number of terms added to the
             # exclusion list, in our experience. Once we update
             # pycosat to do this, this can use it.
-            sol = self.sat(chain(constraints, exclude))
-            if sol is None:
-                return
-            yield sol
-            exclude.append([-k for k in sol if -m <= k <= m])
+    #        sol = self.sat(chain(constraints, exclude))
+    #        if sol is None:
+    #            return
+    #        yield sol
+    #        exclude.append([-k for k in sol if -m <= k <= m])
 
     def minimize(self, objective, bestsol=None, trymax=False):
         """
@@ -471,8 +621,10 @@ class Clauses(object):
         minimization is multiobjective: first, we minimize the largest
         active coefficient value, then we minimize the sum.
         """
+	eprint("Minimizing objective = " + str(objective) +" |||| best solution= " + bestsol)
         if bestsol is None or len(bestsol) < self.m:
             log.debug('Clauses added, recomputing solution')
+	    assert(False)
             bestsol = self.sat()
         if bestsol is None or self.unsat:
             log.debug('Constraints are unsatisfiable')
@@ -522,14 +674,18 @@ class Clauses(object):
                     mid = try0
                 if peak:
                     self.Prevent(self.Any, tuple(a for c, a in objective if c > mid))
+		    assert(False)
                     temp = tuple(a for c, a in objective if lo <= c <= mid)
                     if temp:
-                        self.Require(self.Any, temp)
+                        self.Require(True, self.Any, temp)
+			assert(False)
                 else:
-                    self.Require(self.LinearBound, objective, lo, mid, False)
+                    self.Require(True, self.LinearBound, objective, lo, mid, False)
+		    assert(False)
                 log.trace('Bisection attempt: (%d,%d), (%d+%d) clauses' %
                           (lo, mid, nz, len(self.clauses)-nz))
-                newsol = self.sat()
+                assert(False)
+		newsol = self.sat()
                 if newsol is None:
                     lo = mid + 1
                     log.trace("Bisection failure, new range=(%d,%d)" % (lo, hi))
@@ -546,6 +702,7 @@ class Clauses(object):
                         break
                 self.m = m_orig
                 if len(self.clauses) > nz:
+		    assert(False)
                     self.clauses = self.clauses[:nz]
                 self.unsat = False
                 try0 = None
@@ -610,6 +767,7 @@ def minimal_unsatisfiable_subset(clauses, sat):
 
     """
     clauses = tuple(clauses)
+    assert(False)
     if sat(clauses):
         raise ValueError("Clauses are not unsatisfiable")
 
@@ -645,9 +803,11 @@ def minimal_unsatisfiable_subset(clauses, sat):
 
         # To display progress, every time we discard clauses, we update the
         # progress by that much.
-        if not sat(A + include):
+        assert(False)
+	if not sat(A + include):
             d += len(B)
             return minimal_unsat(A, include)
+	assert(False)
         if not sat(B + include):
             d += len(A)
             return minimal_unsat(B, include)
