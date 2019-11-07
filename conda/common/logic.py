@@ -81,16 +81,42 @@ class Clauses(object):
     def from_index(self, m):
         return self.indices.get(m)
 
+        
     def Assign_(self, vals, name=None):
         tvals = type(vals)
         if tvals is tuple:
             x = self.new_var()
-	    eprint("new var in Assign_ " + str(x))
+	    eprint("1.new var in Assign_ " + str(x))
+	    eprint("vals[0] = " + str(vals[0]))
+	    eprint("vals[1] = " + str(vals[1]))
             self.clauses.extend((-x,) + y for y in vals[0])
             self.clauses.extend((x,) + y for y in vals[1])
+	    def AssertNegate(constr, negconstr):
+	        if len(negconstr) == 0:
+		    return
+		def negate(constr):
+		    t = type(constr)
+		    if t is list:
+		        mylist = map(negate,constr)
+			tmpor = ()
+			for l in mylist:
+			    tmpor += l
+			return [tmpor]
+		    if t is tuple:
+		    	return tuple(map(negate,constr))
+		    return constr * -1
+	        eprint("negate var[1] = " + str(negate(negconstr) ) )
+	        assert(constr == negate(negconstr))
+	    AssertNegate(vals[0], vals[1])
+	    assert(len(vals[0]) >0)
+	    andlist = []
+	    for y in vals[0]:
+	    	andlist.append(self.satune.Any(list(y)) )
+	    self.satune.mapVarToConstraint(x, self.satune.All(andlist, False))
         elif tvals is bool and name:
             x = self.new_var()
-	    eprint("new var in Assign_ name " + str(x))
+	    self.satune.mapVarToConstraint(x, self.satune.getBooleanTrue())
+	    eprint("2.new var in Assign_ name " + str(x))
             self.clauses.append((x,) if vals else (-x,))
         else:
 	    eprint("Not creating new var! Using vals " + str(vals))
@@ -142,7 +168,7 @@ class Clauses(object):
 	eprint(self.Convert_(args))
         ret, satval = what.__get__(self, Clauses)(*args, polarity=False, name=False)
 	eprint("Conda addConstraint: " + str(ret))
-	self.satune.addConstraint( satune.Not(satval, False))
+	self.satune.addConstraint( self.satune.Not(satval, False))
 	return ret
 
     def Require(self, addConstr, what, *args):
@@ -179,7 +205,7 @@ class Clauses(object):
     def And(self, f, g, polarity=None, name=None):
     	convF = self.Convert_(f)
 	convG = self.Convert_(g)
-        return self.Eval_(self.And_, (f, g), polarity, name), self.satune.And(convF,convG) if polarity in (True, None) else self.satune.Not(self.satune.And(convF,convG), False)
+        return self.Eval_(self.And_, (f, g), polarity, name), self.satune.And(convF,convG ) if polarity in (True, None) else self.satune.Not(self.satune.And(convF,convG ), False)
 
     def Or_(self, f, g, polarity):
         if f is True or g is True:
@@ -201,7 +227,7 @@ class Clauses(object):
 	convG = self.Convert_(g)
 	eprint("f:Conv( " + str(f) + " )= "+ str(convF))
 	eprint("g:Conv( " + str(g) + " )= "+ str(convG))
-	return self.Eval_(self.Or_, (f, g), polarity, name), self.satune.Or(convF,convG) if polarity in (True,None) else self.satune.Not(self.satune.Or(convF,convG), False)
+	return self.Eval_(self.Or_, (f, g), polarity, name), self.satune.Or(convF,convG ) if polarity in (True,None) else self.satune.Not(self.satune.Or(convF,convG), False)
 
     def Xor_(self, f, g, polarity):
         if f is False:
@@ -414,8 +440,8 @@ class Clauses(object):
             ret[call_stack.pop()], _ = self.ITE(abs(LA), thi, tlo, polarity, None, False)
         return ret[target]
 
+
     def BDD_Satune(self, equation, nterms, lo, hi, polarity):
-        assert(False)
         # The equation is sorted in order of increasing coefficients.
         # Then we take advantage of the following recurrence:
         #                l      <= S + cN xN <= u
@@ -426,43 +452,34 @@ class Clauses(object):
         target = (nterms-1, 0, total)
         call_stack = [target]
         ret = {}
-	retSAT={}
         csum = 0
         while call_stack:
             ndx, csum, total = call_stack[-1]
             lower_limit = lo - csum
             upper_limit = hi - csum
             if lower_limit <= 0 and upper_limit >= total:
-	    	index = call_stack.pop()
-                ret[index] = True
-		retSAT[index] = self.satune.getBooleanTrue()
+                ret[call_stack.pop()] = True
                 continue
             if lower_limit > total or upper_limit < 0:
-                index = call_stack.pop()
-		ret[index] = False
-		retSAT[index]= self.satune.getBooleanFalse()
+                ret[call_stack.pop()] = False
                 continue
             LC, LA = equation[ndx]
             ndx -= 1
             total -= LC
             hi_key = (ndx, csum if LA < 0 else csum + LC, total)
             thi = ret.get(hi_key)
-	    thiSAT = retSAT.get(hi_key)
             if thi is None:
                 call_stack.append(hi_key)
                 continue
             lo_key = (ndx, csum + LC if LA < 0 else csum, total)
             tlo = ret.get(lo_key)
-	    tloSAT = retSAT.get(lo_key)
             if tlo is None:
                 call_stack.append(lo_key)
                 continue
-	    #eprint("BDD_SATUNE.self.ITE (" + str(abs(LA)) + ", " + str(thi) + ", " + str(tlo) +" )")
-	    assert(False)
-	    index = call_stack.pop()
-            ret[index], retSAT[index] = self.ITE(abs(LA), thi, tlo, polarity)
-        return ret[target], retSAT[target]
-
+            #eprint("BDD_.self.ITE (" + str(abs(LA)) + ", " + str(thi) + ", " + str(tlo) +" )")
+            ret[call_stack.pop()], _ = self.ITE(abs(LA), thi, tlo, polarity, None, False)
+        assert(type(ret[target]) not in (list, tuple) or len(ret[target]) == 1)
+	return self.satune.getConstraint(ret[target])
 
     def LinearBound_(self, equation, lo, hi, preprocess, polarity):
         if preprocess:
@@ -490,11 +507,11 @@ class Clauses(object):
         if nprune:
             prune= self.All_([-a for c, a in equation[nterms:]], polarity)
             res = self.Combine_((res, prune), polarity)
+	eprint("LinearBound_ returned: " + str(res) )
         return res
 
 
     def LinearBound_Satune(self, equation, lo, hi, preprocess, polarity):
-        assert(False)
 	if preprocess:
             equation, offset = self.LB_Preprocess_(equation)
             lo -= offset
@@ -520,18 +537,26 @@ class Clauses(object):
         else:
             res = self.BDD_(equation, nterms, lo, hi, polarity)
             resSAT = self.BDD_Satune(equation, nterms, lo, hi, polarity)
+	    eprint("BDD_Satune returned: " + str(resSAT))
         if nprune:
 	    values=[-a for c, a in equation[nterms:]]
             prune = self.All_(values, polarity)
 	    pruneSAT= self.satune.All(values) if polarity in (True, None) else self.satune.Not(self.satune.All(values) , False)
+	    eprint("PruneSAAT got the value: " + str(pruneSAT) )
             res = self.Combine_((res, prune), polarity)
 	    resSAT = self.satune.All([resSAT,pruneSAT], False) if polarity in (True, None) else self.satune.Not(self.satune.All([resSAT,pruneSAT], False), False)
-        return resSAT
+        eprint("LinearBound_Satune returned: " + str(resSAT))
+	return resSAT
 
     def LinearBound(self, equation, lo, hi, preprocess=True, polarity=None, name=None):
         return self.Eval_(self.LinearBound_, (equation, lo, hi, preprocess),
-                          polarity, name, conv=False), LinearBound_Satune(equation, lo, hi, preprocess, polarity)
+                          polarity, name, conv=False), self.LinearBound_Satune(equation, lo, hi, preprocess, polarity)
 
+    def replaceSatune(self, newSatune):
+    	eprint("Destroying the old SATTune and replace it with new one!!!")
+    	self.satune.destroy()
+	self.satune = newSatune
+    
     def sat(self, additional=None, includeIf=False, names=False, limit=0):
         """
         Calculate a SAT solution for the current clause set.
@@ -545,6 +570,7 @@ class Clauses(object):
         if not self.m:
             return set() if names else []
         clauses = self.clauses
+	cloneSatune = None
         if additional:
             def preproc(eqs):
                 def preproc_(cc):
@@ -574,8 +600,14 @@ class Clauses(object):
 			for v in vals:
 				valsConstr.append(self.satune.Any(v))
 			self.satune.addConstraint(self.satune.All( valsConstr, False))
+		if not includeIf: #When there are additionals but we don't include them
+			cloneSatune = self.satune.clone()
 		addAdditionalToSatune()
+		if includeIf: # When there are additionals and we include them
+			cloneSatune = self.satune.clone()
 	#self.satune.printConstraints()
+	if not cloneSatune: # When there are no additionals
+		cloneSatune = self.satune.clone()
 	eprint("Invoking SAT with clause count: " + str(len(clauses)))
 	eprint("Clauses= " + str(clauses))
 	start = time.time()
@@ -589,11 +621,12 @@ class Clauses(object):
 	eprint(satend - end)
 	eprint("satsolution=" + str(satsolution))
 	eprint("solution=" + str(solution))
-	assert((satsolution ==0 and solution == "UNSAT") or (satsolution ==1 and solution == "SAT")  )
-        if solution in ("UNSAT", "UNKNOWN"):
+	assert((satsolution ==0 and solution == "UNSAT") or (satsolution ==1 and len(solution) > 0)  )
+        assert( cloneSatune)
+	self.replaceSatune(cloneSatune)
+	if solution in ("UNSAT", "UNKNOWN"):
             return None
         if additional and includeIf:
-	    assert(False)
             self.clauses.extend(additional)
         if names:
             return set(nm for nm in (self.indices.get(s) for s in solution) if nm and nm[0] != '!')
@@ -621,11 +654,12 @@ class Clauses(object):
         minimization is multiobjective: first, we minimize the largest
         active coefficient value, then we minimize the sum.
         """
-	eprint("Minimizing objective = " + str(objective) +" |||| best solution= " + bestsol)
+	eprint("Minimizing objective = " + str(objective) +" |||| best solution= " + str(bestsol))
         if bestsol is None or len(bestsol) < self.m:
             log.debug('Clauses added, recomputing solution')
 	    assert(False)
             bestsol = self.sat()
+
         if bestsol is None or self.unsat:
             log.debug('Constraints are unsatisfiable')
             return bestsol, sum(abs(c) for c, a in objective) + 1 if objective else 1
@@ -663,28 +697,26 @@ class Clauses(object):
             hi = bestval
             m_orig = self.m
             nz = len(self.clauses)
+	    nzClone = self.satune.clone()
             if trymax and not peak:
                 try0 = hi - 1
 
             log.trace("Initial range (%d,%d)" % (lo, hi))
             while True:
+	    	eprint("Starting the loop ...")
                 if try0 is None:
                     mid = (lo+hi) // 2
                 else:
                     mid = try0
                 if peak:
                     self.Prevent(self.Any, tuple(a for c, a in objective if c > mid))
-		    assert(False)
                     temp = tuple(a for c, a in objective if lo <= c <= mid)
                     if temp:
                         self.Require(True, self.Any, temp)
-			assert(False)
                 else:
                     self.Require(True, self.LinearBound, objective, lo, mid, False)
-		    assert(False)
                 log.trace('Bisection attempt: (%d,%d), (%d+%d) clauses' %
                           (lo, mid, nz, len(self.clauses)-nz))
-                assert(False)
 		newsol = self.sat()
                 if newsol is None:
                     lo = mid + 1
@@ -702,7 +734,8 @@ class Clauses(object):
                         break
                 self.m = m_orig
                 if len(self.clauses) > nz:
-		    assert(False)
+		    eprint("New Constraints are added, we should replace it to the old one ...")
+		    self.replaceSatune(nzClone.clone())
                     self.clauses = self.clauses[:nz]
                 self.unsat = False
                 try0 = None

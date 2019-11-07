@@ -710,6 +710,7 @@ class Resolve(object):
         end = time.time()
 	eprint("SAT SOLVING TIME:")
 	eprint(end - start)
+	C.replaceSatune(None)
 	return bool(solution)
 
     def get_conflicting_specs(self, specs):
@@ -720,7 +721,6 @@ class Resolve(object):
         # Check if satisfiable
         def mysat(specs, add_if=False):
             constraints = r2.generate_spec_constraints(C, specs)
-	    assert(False)
             return C.sat(constraints, add_if)
 
         r2 = Resolve(reduced_index, True, True, channels=self.channels)
@@ -764,7 +764,6 @@ class Resolve(object):
             # list of packages to maintain consistency with
             snames = set()
             eq_optional_c = r2.generate_removal_count(C, specs)
-	    assert(False)
             solution, _ = C.minimize(eq_optional_c, C.sat())
             snames.update(dists[Dist(q)]['name']
                           for q in (C.from_index(s) for s in solution)
@@ -866,7 +865,6 @@ class Resolve(object):
         # Check if satisfiable
         def mysat(specs, add_if=False):
             constraints = r2.generate_spec_constraints(C, specs)
-            assert(False)
 	    return C.sat(constraints, add_if)
 
         r2 = Resolve(reduced_index, True, True, channels=self.channels)
@@ -898,7 +896,8 @@ class Resolve(object):
         # Removed packages: minimize count
         if _remove:
             eq_optional_c = r2.generate_removal_count(C, speco)
-            solution, obj7 = C.minimize(eq_optional_c, solution)
+            assert(False)
+	    solution, obj7 = C.minimize(eq_optional_c, solution)
             log.debug('Package removal metric: %d', obj7)
 
         # Requested packages: maximize versions
